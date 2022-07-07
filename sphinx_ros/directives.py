@@ -22,6 +22,10 @@ ros_sig_re = re.compile(
      ''', re.VERBOSE)
 
 
+def unicode(x):
+    return x
+
+
 def name_to_key(name):
     return unicode(name[0].upper())
 
@@ -40,13 +44,15 @@ def split_pkg_object(signature, obj_type):
 
 # This override allows our inline type specifiers to behave like :class: link
 # when it comes to handling "." and "~" prefixes.
-class RosXRefMixin(object):
-    def make_xref(self, rolename, domain, target, innernode=nodes.emphasis,
-                  contnode=None, env=None):
+class RosXRefMixin:
+    def make_xref(self, rolename, domain, target,
+                  innernode = nodes.emphasis,
+                  contnode = None, env = None,
+                  inliner = None, location = None):
         if sphinx.version_info[:2] >= (1, 5):
             result = super(RosXRefMixin, self).make_xref(rolename, domain,
                                                          target, innernode,
-                                                         contnode, env)
+                                                         contnode, env, inliner, location)
         else:
             result = super(RosXRefMixin, self).make_xref(rolename, domain,
                                                          target, innernode,
@@ -398,6 +404,8 @@ class RosMessageDirective(RosType):
                       typenames=('msg_paramtype',),
                       can_collapse=True),
     ]
+
+
 
     def add_object_to_domain_data(self, fullname, obj_type):
         ros_domain = self.env.get_domain('ros')
