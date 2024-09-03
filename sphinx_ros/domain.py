@@ -1,50 +1,121 @@
-"""
-``sphinx_ros.domain`` module
-============================
-
-This module defines the ROS domain. It defines three object types (messages,
-services, and actions) and registers the roles and directives in the Sphinx
-application.
-"""
-
-from six import iteritems
+from typing import (TYPE_CHECKING, Any, Dict, Iterable, List, Optional,
+                    Tuple, Type, Union)
+import warnings
 from docutils import nodes
-from sphinx.domains import Domain, ObjType
+from docutils.nodes import Element
+from sphinx.addnodes import pending_xref
+from sphinx.domains import Domain, ObjType, Index
 from sphinx.util.nodes import make_refnode
-from .xref_role import RosXRefRole
-from .directives import RosPackageDirective, RosCurrentPackageDirective, \
-    RosMessageDirective, RosActionDirective, RosServiceDirective
-from .indices import RosPackageIndex, RosMessageIndex
+from sphinx.roles import XRefRole, EmphasizedLiteral
+from sphinx.util.typing import RoleFunction
+
+if TYPE_CHECKING:
+    from sphinx.builders import Builder
+    from sphinx.environment import BuildEnvironment
+
+from .roles import PackageComponentRole, NodeComponentRole, InterfaceRole, FieldRole
+from .directives import (
+    ROSPackageDirective,
+    ROSCurrentPackageDirective,
+    RosMessageDirective,
+    RosActionDirective,
+    RosServiceDirective,
+    ROSNodeDirective,
+    ROSCurrentNodeDirective,
+    ExecutableDirective,
+    SubscriptionDirective,
+    PublisherDirective,
+    ServiceServerDirective,
+    ServiceClientDirective,
+    ActionServerDirective,
+    ActionClientDirective,
+    LaunchFileDirective,
+    ModelDirective,
+    ParameterDirective,
+    RosAutoMessageDirective,
+    RosAutoInterfacesDirective,
+    RosAutoLaunchFileDirective,
+    RosAutoServiceDirective,
+    RosAutoActionDirective,
+    NodeSummaryDirective,
+    PackageSummaryDirective,
+    GLTFDirective)
+from .utils import interface_reference
+# from .indices import RosPackageIndex, RosMessageIndex
 
 
 class RosDomain(Domain):
-    """
-    The actual domain class.
-    """
     name = 'ros'
     label = 'ROS'
-    object_types = {
-        'message':   ObjType('message', 'msg', 'obj'),
-        'service':   ObjType('service', 'srv', 'obj'),
-        'action':    ObjType('action', 'action', 'obj')
+    object_types: Dict[str, ObjType] = {
+        'node': ObjType('node', 'node', 'obj'),
+        'parameter': ObjType('parameter', 'param', 'obj'),
+        'subscription': ObjType('subscription', 'sub', 'obj'),
+        'publisher': ObjType('publisher', 'pub', 'obj'),
+        'service_client': ObjType('service_client', 'client', 'obj'),
+        'service_server': ObjType('service_server', 'server', 'obj'),
+        'action_client': ObjType('action_client', 'act_client', 'obj'),
+        'action_server': ObjType('action_server', 'act_server', 'obj'),
+        'package': ObjType('package', 'pkg', 'obj'),
+        'executable': ObjType('executable', 'exec', 'obj'),
+        'message': ObjType('message', 'msg', 'obj', 'interface'),
+        'service': ObjType('service', 'srv', 'obj', 'interface'),
+        'action': ObjType('action', 'act', 'obj', 'interface'),
+        'launch_file': ObjType('launch_file', 'launch', 'obj'),
+        'model': ObjType('model', 'model', 'obj')
     }
-    roles = {
-        'pkg': RosXRefRole(),
-        'msg': RosXRefRole(),
-        'srv': RosXRefRole(),
-        'act': RosXRefRole()
+    roles: Dict[str, Union[RoleFunction, XRefRole]] = {
+        'pkg': XRefRole(),
+        'launch': PackageComponentRole(),
+        'model': PackageComponentRole(),
+        'exec': PackageComponentRole(),
+        'msg': InterfaceRole(show_type='msg'),
+        'srv': InterfaceRole(show_type='srv'),
+        'action': InterfaceRole(show_type='action'),
+        'node': XRefRole(),
+        'param': NodeComponentRole(),
+        'pub': NodeComponentRole(),
+        'sub': NodeComponentRole(),
+        'srv_client': NodeComponentRole(),
+        'srv_server': NodeComponentRole(),
+        'act_client': NodeComponentRole(),
+        'act_server': NodeComponentRole(),
+        'value': EmphasizedLiteral(),
+        'field': FieldRole(show_container=True, show_type='msg')
     }
-    directives = {
-        'package':          RosPackageDirective,
-        'currentpackage':   RosCurrentPackageDirective,
-        'message':          RosMessageDirective,
-        'service':          RosServiceDirective,
-        'action':           RosActionDirective
+    directives: Dict[str, Any] = {
+        'package': ROSPackageDirective,
+        'currentpackage': ROSCurrentPackageDirective,
+        'message': RosMessageDirective,
+        'service': RosServiceDirective,
+        'action': RosActionDirective,
+        'node': ROSNodeDirective,
+        'currentnode': ROSCurrentNodeDirective,
+        'subscription': SubscriptionDirective,
+        'publisher': PublisherDirective,
+        'service_server': ServiceServerDirective,
+        'service_client': ServiceClientDirective,
+        'action_server': ActionServerDirective,
+        'action_client': ActionClientDirective,
+        'launch_file': LaunchFileDirective,
+        'model': ModelDirective,
+        'parameter': ParameterDirective,
+        'automessage': RosAutoMessageDirective,
+        'autointerfaces': RosAutoInterfacesDirective,
+        'autolaunch_file': RosAutoLaunchFileDirective,
+        'autoservice': RosAutoServiceDirective,
+        'autoaction': RosAutoActionDirective,
+        'executable': ExecutableDirective,
+        'nodesummary': NodeSummaryDirective,
+        'packagesummary': PackageSummaryDirective,
+        'model-viewer': GLTFDirective
     }
-    initial_data = {
+    initial_data: Dict = {
         'objects': {},   # fullname -> docname, objtype
-        'packages': {},  # name -> document name, anchor, priority, deprecated
-        'messages': {},  # name -> document name, anchor, priority, deprecated
+        'package': {},  # name -> document name, anchor, priority, deprecated
+        'node': {},  # name -> document name, anchor, priority, deprecated
+        'node_components': {},
+        'package_components': {},
         'labels': {
             'ros-pkgindex': ('ros-pkgindex', '', 'Package Index'),
             'ros-msgindex': ('ros-msgindex', '', 'Message Type Index')
@@ -54,132 +125,84 @@ class RosDomain(Domain):
             'ros-msgindex': ('ros-msgindex', '')
         }
     }
-    indices = [
-        RosPackageIndex,
-        RosMessageIndex,
+    indices: List[Type[Index]] = [
+        # RosPackageIndex,
+        # RosMessageIndex,
     ]
 
-    def clear_doc(self, docname):
-        for fullname, (fn, _l) in list(self.data['objects'].items()):
-            if fn == docname:
-                del self.data['objects'][fullname]
-        # name -> document name, anchor, priority, deprecated
-        for pkgname, (fn, _, _, _) in list(self.data['packages'].items()):
-            if fn == docname:
-                del self.data['packages'][pkgname]
+    def clear_doc(self, docname: str) -> None:
+        for c in ('node', 'package'):
+            for name, (fn, _) in list(self.data[c].items()):
+                if fn == docname:
+                    del self.data[c][name]
+                cs = self.data[f'{c}_components'].get(name, {})
+                for _, ls in cs.items():
+                    for n, (f, _) in list(ls.items()):
+                        if f == docname:
+                            del ls[n]
 
-    def find_obj(self, env, pkgname, name, type, searchmode=0):
-        """
-        Find a ROS object for ``name``, perhaps using ``pkgname``.
-        """
-        if name.endswith('()'):
-            name = name[:-2]
+    # override
+    def resolve_xref(self, env: "BuildEnvironment", fromdocname: str, builder: "Builder",
+                     typ: str, target: str, node: pending_xref, contnode: Element
+                     ) -> Optional[Element]:
+        # print('resolve_xref', typ, target, node, contnode, 'ros:node' in node)
 
-        if not name:
-            return []
+        if typ == 'field':
+            typ = 'msg'
 
-        objects = self.data['objects']
-        matches = []
-
-        newname = None
-        if searchmode == 1:
-            if type is None:
-                objtypes = list(self.object_types)
+        if typ in ('msg', 'srv', 'action'):
+            package = node['ros:package']
+            obj: Optional[Tuple[str, str]] = self.data['package_components'].get(package, {}).get(typ, {}).get(target)
+            if obj:
+                file_name, fullname = obj
+                return make_refnode(builder, fromdocname, file_name, fullname, contnode, fullname)
             else:
-                objtypes = self.objtypes_for_role(type)
-        else:
-            # NOTE: searching for exact match, object type is not considered
-            if name in objects:
-                newname = name
-            elif type == 'pkg':
-                # only exact matches allowed for packages
-                return []
-            elif pkgname and pkgname + '.' + name in objects:
-                newname = pkgname + '.' + name
+                target = interface_reference(package, typ, target)
+                ref_node = nodes.reference()
+                ref_node['refuri'] = target
+                ref_node += contnode
+                return ref_node
 
-        if newname is not None:
-            matches.append((newname, objects[newname]))
-        return matches
+        for container_type in ('node', 'package'):
+            key = f'ros:{container_type}'
+            if key in node:
+                container = node.get(key)
+                try:
+                    file_name, fullname = self.data[f'{container_type}_components'][container][typ][target]
+                except KeyError:
+                    warnings.warn(f"Could not find {typ} {target} for {container_type} {container}")
+                    return None
+                return make_refnode(builder, fromdocname, file_name, fullname, contnode,
+                                    fullname)
 
-    def resolve_xref(self, env, fromdocname, builder, type, target, node,
-                     contnode):
-        pkgname = node.get('ros:package')
-        searchmode = node.hasattr('refspecific') and 1 or 0
+        if typ == 'pkg':
+            typ = 'package'
 
-        matches = self.find_obj(env, pkgname, target, type, searchmode)
+        if typ in self.data and target in self.data[typ]:
+            file_name, fullname = self.data[typ][target]
+            return make_refnode(builder, fromdocname, file_name, fullname, contnode,
+                                fullname)
+        return None
 
-        if not matches:
-            return None
-        elif len(matches) > 1:
-            env.warn_node(
-                'more than one target found for cross-reference '
-                '%r: %s' % (target, ', '.join(match[0] for match in matches)),
-                node)
-        name, obj = matches[0]
+    # TODO(Jerome) override
+    def resolve_any_xref(self, env: "BuildEnvironment", fromdocname: str, builder: "Builder",
+                         target: str, node: pending_xref, contnode: Element
+                         ) -> List[Tuple[str, Element]]:
+        return []
 
-        if obj[1] == 'package':
-            return self._make_package_refnode(builder, fromdocname, name,
-                                              contnode)
-        else:
-            return make_refnode(builder, fromdocname, obj[0], name, contnode,
-                                name)
+    # TODO(Jerome) override
+    def get_objects(self) -> Iterable[Tuple[str, str, str, str, str, int]]:
+        return []
 
-    def resolve_any_xref(self, env, fromdocname, builder, target, node,
-                         contnode):
-        pkgname = node.get('ros:package')
-        results = []
-
-        # Always search in 'refspecific' mode with the :any: role
-        matches = self.find_obj(env, pkgname, target, None, 1)
-        for name, obj in matches:
-            if obj[1] == 'package':
-                results.append(('ros:pkg',
-                               self._make_package_refnode(builder,
-                                                          fromdocname,
-                                                          name, contnode)))
-            else:
-                results.append(('ros:' + self.role_for_objtype(obj[1]),
-                                make_refnode(builder, fromdocname, obj[0],
-                                             name, contnode, name)))
-        return results
-
-    def _make_package_refnode(self, builder, fromdocname, name, contnode):
-        # Get additional info for packages
-        # name -> document name, anchor, priority, deprecated
-        docname, anchor, _, deprecated = self.data['packages'][name]
-        title = name
-        if deprecated:
-            title += ' (deprecated)'
-        return make_refnode(builder, fromdocname, docname, anchor, contnode,
-                            title)
-
-    def get_objects(self):
-        for pkgname, info in iteritems(self.data['packages']):
-            yield (pkgname, pkgname, 'package', info[0],
-                   'package-' + pkgname, 0)
-        for refname, (docname, type) in iteritems(self.data['objects']):
-            if type != 'package':
-                yield (refname, refname, type, docname, refname, 1)
-
-    def add_package(self, name, deprecated):
-        """
-        Adds a package to the domain data.
-
-        :param str name: The name of the package
-        :param bool deprecated: Indicates whether the package is deprecated.
-        :return: The unique anchor of the package.
-        :rtype: str
-        """
-        anchor = 'ros-pkg-{}'.format(name)
-        # name -> document name, anchor, priority, deprecated
-        self.data['packages'][name] = (self.env.docname, anchor, 0, deprecated)
-        # make a duplicate entry in 'objects' to facilitate searching for the
-        # package in RosDomain.find_obj()
-        self.data['objects'][name] = (self.env.docname, 'package')
+    def add_container(self, name: str, typ: str) -> str:
+        anchor = '.'.join((typ, name))
+        self.data[typ][name] = (self.env.docname, anchor)
         return anchor
 
-    def add_message(self, name, deprecated):
-        # name -> document name, anchor, priority, deprecated
-        self.data['messages'][name] = (self.env.docname, name, 0, deprecated)
-        self.data['objects'][name] = (self.env.docname, 'message')
-        return name
+    def add_component(self, container_typ: str, container_name: str, typ: str, name: str) -> str:
+        fullname = '.'.join((container_name, typ, name))
+        value = (self.env.docname, fullname)
+        if container_typ in ('package', 'node'):
+            components = self.data[f'{container_typ}_components']
+            components.setdefault(container_name, {}).setdefault(typ, {})[name] = value
+        return fullname
